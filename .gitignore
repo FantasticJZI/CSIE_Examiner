@@ -1,0 +1,11 @@
+# 敏感資訊
+.env
+
+# 資料庫檔案
+*.db
+
+# Python 快取與環境
+__pycache__/
+venv/
+.venv/
+.DS_Store
