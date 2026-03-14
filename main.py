@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import datetime
+from datetime import time, timezone, timedelta
 import random
 import discord
 from discord import ui
@@ -9,19 +10,40 @@ from discord.ext import commands, tasks
 from google import genai
 from dotenv import load_dotenv
 
-# --- 1. 環境初始化 ---
+# --- 1. 環境與時區初始化 ---
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-FORUM_CHANNEL_ID = int(os.getenv("DAILY_CHANNEL_ID"))
 DB_PATH = os.getenv("DB_PATH", "study_fortress.db")
 
+# 定義台灣時區 (UTC+8)
+tw_tz = timezone(timedelta(hours=8))
+
+# 建立 Gemini Client
 client = genai.Client(api_key=GEMINI_KEY)
 
 
-# --- 2. 資料庫邏輯 (持久化存儲) ---
+# 防禦性讀取環境變數
+def get_env_int(key):
+    val = os.getenv(key)
+    if val is None:
+        raise ValueError(f"❌ 找不到環境變數 '{key}'，請檢查設定。")
+    return int(val)
+
+
+try:
+    FORUM_CHANNEL_ID = get_env_int("DAILY_CHANNEL_ID")
+except ValueError as e:
+    print(e)
+    FORUM_CHANNEL_ID = 0
+
+
+# --- 2. 資料庫邏輯 (含目錄自動建立) ---
 class StudyDB:
     def __init__(self, path):
+        db_dir = os.path.dirname(path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir)
         self.conn = sqlite3.connect(path)
         self.create_tables()
 
@@ -60,9 +82,9 @@ class StudyDB:
         return [row[0] for row in cursor.fetchall()]
 
 
-# --- 3. UI 元件：隱私提交彈窗 ---
+# --- 3. UI 元件：隱私提交與詳解 ---
 class AnswerModal(ui.Modal, title='📝 提交你的修行答案'):
-    answer = ui.TextInput(label='你的回答', style=discord.TextStyle.paragraph, placeholder='請簡述你的觀念...',
+    answer = ui.TextInput(label='你的回答', style=discord.TextStyle.paragraph, placeholder='請針對觀念簡短回答...',
                           min_length=5, max_length=500)
 
     def __init__(self, db, today_q):
@@ -71,10 +93,10 @@ class AnswerModal(ui.Modal, title='📝 提交你的修行答案'):
         self.today_q = today_q
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_message("⏳ AI 導師正在批改並調閱詳解中...", ephemeral=True)
+        await interaction.response.send_message("⏳ AI 導師正在批改中...", ephemeral=True)
 
-        instruction = """你是一位台灣資工考研名師。針對回答給予簡短建議並提供精簡詳解。
-        控制在 300 字內。最後一行必須遵守格式：SCORE_DATA: {"score": 1-10, "is_related": bool}"""
+        instruction = """你是一位台灣資工考研名師。針對回答給予建議並提供詳解。
+        控制在 300 字內。最後一行格式：SCORE_DATA: {"score": 1-10, "is_related": bool}"""
 
         try:
             response = client.models.generate_content(model='gemini-2.5-flash',
@@ -97,18 +119,17 @@ class AnswerModal(ui.Modal, title='📝 提交你的修行答案'):
                         self.db.add_xp(interaction.user.id, xp_gain)
                         status_msg = f"✨ 修行達成！獲得 **{xp_gain} XP**"
                     else:
-                        status_msg = "💡 今日獎勵已領取，本次為純觀念研討。"
+                        status_msg = "💡 今日已領取獎勵，本次為觀念研討。"
 
                     embed = discord.Embed(title="🎯 修行結算報告 (私密)", description=display_text, color=0x3498db)
                     embed.add_field(name="當前狀態", value=status_msg, inline=False)
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
-                    await interaction.followup.send("⚠️ 內容與題目關聯度不足，請重新思考。", ephemeral=True)
+                    await interaction.followup.send("⚠️ 內容與題目關聯度不足。", ephemeral=True)
             else:
                 await interaction.followup.send(f"導師回饋：\n{ai_reply[:1900]}", ephemeral=True)
         except Exception as e:
-            print(f"評分錯誤：{e}")
-            await interaction.followup.send("🚨 系統忙碌，請稍候。", ephemeral=True)
+            await interaction.followup.send("🚨 系統忙碌中。", ephemeral=True)
 
 
 class ChallengeView(ui.View):
@@ -122,7 +143,7 @@ class ChallengeView(ui.View):
         await interaction.response.send_modal(AnswerModal(self.db, self.today_q))
 
 
-# --- 4. 治理模組：規則發布 ---
+# --- 4. 治理與考官模組 ---
 class GovernanceCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -130,20 +151,14 @@ class GovernanceCog(commands.Cog):
     @commands.command(name="rules")
     @commands.has_permissions(administrator=True)
     async def rules(self, ctx):
-        """發布伺服器修煉規則"""
-        embed = discord.Embed(title="📜 【考研要塞】資工所修煉守則", color=0x2c3e50)
-        embed.description = "資工人的魂在於思考與實作。為了維護純粹的學術空間，請遵守以下規範："
-        embed.add_field(name="1. 禁止伸手", value="提問前請提供個人思路。Deadlock 發生時請主動提出解決方案。",
-                        inline=False)
-        embed.add_field(name="2. 尊重防雷", value="討論串內請避免直接貼出答案，善用按鈕提交系統。", inline=False)
-        embed.add_field(name="3. 格式嚴謹", value="張貼 Code 請使用 Markdown 語法，關鍵術語建議保留英文原文。",
-                        inline=False)
-        embed.set_footer(text="願各位都能成為 Top 1% 的資工人才。")
+        embed = discord.Embed(title="📜 【考研要塞】修煉守則", color=0x2c3e50)
+        embed.add_field(name="1. 禁止伸手", value="提問前請提供思路，資工人的魂在於思考。", inline=False)
+        embed.add_field(name="2. 尊重防雷", value="請善用 ||防雷標籤|| 或私密提交系統。", inline=False)
+        embed.set_footer(text="願各位都能成功攻克頂大資工所。")
         await ctx.send(embed=embed)
         await ctx.message.delete()
 
 
-# --- 5. 核心考官 Cog ---
 class ExaminerCog(commands.Cog):
     def __init__(self, bot, db):
         self.bot = bot
@@ -153,8 +168,10 @@ class ExaminerCog(commands.Cog):
                          "計算機組織 (Arch)": ["Pipeline", "Cache"]}
         self.daily_task.start()
 
-    @tasks.loop(time=datetime.time(hour=8, minute=0))
+    # ✨ 關鍵修復：加入 tw_tz 台灣時區校正
+    @tasks.loop(time=time(hour=8, minute=0, tzinfo=tw_tz))
     async def daily_task(self):
+        print(f"⏰ [系統] 台灣時間 08:00，開始執行自動產題程序。")
         await self.push_question()
 
     async def push_question(self):
@@ -164,7 +181,7 @@ class ExaminerCog(commands.Cog):
         topic = random.choice(self.subjects[subject])
         recent = "\n".join([f"- {q[:30]}..." for q in self.db.get_recent_questions()])
 
-        prompt = f"你是一位台灣資工考研名師。請針對『{subject}』產出一題 50 字內能答完的觀念題。避開重複：{recent}"
+        prompt = f"你是一位台灣資工考研名師。產出一題關於『{subject}』中『{topic}』的精簡觀念題，50字內答完。避開：{recent}"
         try:
             res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
             self.today_question = res.text.strip()
@@ -173,7 +190,7 @@ class ExaminerCog(commands.Cog):
             view = ChallengeView(self.db, self.today_question)
             await channel.create_thread(name=f"【挑戰】{datetime.date.today()} | {subject}", embed=embed, view=view)
         except Exception as e:
-            print(f"產題錯誤：{e}")
+            print(f"🚨 產題出錯：{e}")
 
     @commands.command(name="test_push", hidden=True)
     async def test_push(self, ctx):
@@ -182,24 +199,12 @@ class ExaminerCog(commands.Cog):
     @commands.command(name="rank")
     async def rank(self, ctx):
         info = self.db.get_user(ctx.author.id)
-        if not info: return await ctx.send("🔍 尚未有修行紀錄。")
+        if not info: return await ctx.send("🔍 尚未有紀錄。")
         xp, date = info
-        embed = discord.Embed(title="📊 個人修行成就", color=0x2ecc71)
-        embed.add_field(name="等級", value=f"**Lv.{(xp // 100) + 1}**", inline=True)
-        embed.add_field(name="累積 XP", value=f"**{xp}**", inline=True)
-        await ctx.send(embed=embed)
-
-    @commands.command(name="top")
-    async def top(self, ctx):
-        users = self.db.get_top_users(10)
-        desc = "\n".join(
-            [f"{i + 1}. **{self.bot.get_user(u[0]).display_name if self.bot.get_user(u[0]) else u[0]}** — `{u[1]} XP`"
-             for i, u in enumerate(users)])
-        await ctx.send(
-            embed=discord.Embed(title="🏆 考研要塞：首席榜", description=desc or "目前無人上榜", color=0xf1c40f))
+        await ctx.send(f"📊 {ctx.author.display_name} | Lv.{(xp // 100) + 1} | {xp} XP | 最後修行：{date}")
 
 
-# --- 6. 啟動入口 ---
+# --- 5. 啟動入口 ---
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
@@ -209,10 +214,11 @@ class MyBot(commands.Bot):
     async def setup_hook(self):
         await self.add_cog(GovernanceCog(self))
         await self.add_cog(ExaminerCog(self, self.db))
-        self.add_view(ChallengeView(self.db, ""))  # 註冊 Persistent View
+        # 註冊 Persistent View 確保重啟不失效
+        self.add_view(ChallengeView(self.db, ""))
 
     async def on_ready(self):
-        print(f"🚀 {self.user.name} 正式版考官已就位。")
+        print(f"🚀 {self.user.name} 穩健版考官已上線。")
 
 
 if __name__ == "__main__":
