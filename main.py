@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-DB_PATH = os.getenv("DB_PATH", "study_fortress.db")
+DB_PATH = os.getenv("DB_PATH", "/app/data/study_fortress.db")
 
 # 定義台灣時區 (UTC+8)
 tw_tz = timezone(timedelta(hours=8))
