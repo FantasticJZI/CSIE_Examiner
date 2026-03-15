@@ -20,7 +20,7 @@ GROQ_KEY = os.getenv("GROQ_API_KEY")
 DB_PATH = os.getenv("DB_PATH", "csie_study.db")
 tw_tz = timezone(timedelta(hours=8))
 
-# ✨ 使用 Groq 最強穩定模型
+# ✨ 使用目前 Groq 支援的最強穩定模型
 groq_client = AsyncGroq(api_key=GROQ_KEY)
 MODEL_NAME = "llama-3.3-70b-versatile"
 
@@ -90,7 +90,7 @@ class AnswerModal(ui.Modal, title='📝 提交修行答案'):
 
     def __init__(self, db, today_q):
         super().__init__()
-        self.db = db;
+        self.db = db
         self.today_q = today_q
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -120,14 +120,14 @@ class AnswerModal(ui.Modal, title='📝 提交修行答案'):
             else:
                 await interaction.followup.send(ai_reply[:1900], ephemeral=True)
         except Exception as e:
-            print(f"Error: {e}");
+            print(f"Error: {e}")
             await interaction.followup.send("🚨 系統連線異常。", ephemeral=True)
 
 
 class ChallengeView(ui.View):
     def __init__(self, db, today_q):
         super().__init__(timeout=None)
-        self.db = db;
+        self.db = db
         self.today_q = today_q
 
     @ui.button(label="📝 我要挑戰", style=discord.ButtonStyle.primary, custom_id="csie_v10_btn")
@@ -138,8 +138,8 @@ class ChallengeView(ui.View):
 # --- 5. 考官、排行榜 Cog ---
 class ExaminerCog(commands.Cog):
     def __init__(self, bot, db):
-        self.bot = bot;
-        self.db = db;
+        self.bot = bot
+        self.db = db
         self.daily_task.start()
 
     @tasks.loop(time=time(hour=8, minute=0, tzinfo=tw_tz))
@@ -160,16 +160,23 @@ class ExaminerCog(commands.Cog):
             embed = discord.Embed(title=f"⚡ 每日挑戰 | {target}", description=f"**{q_text}**", color=0x3498db)
             await channel.create_thread(name=f"【戰友修行】{datetime.date.today()}", embed=embed,
                                         view=ChallengeView(self.db, q_text))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"產題失敗: {e}")
+
+    # ✨ 整合回來的測試指令
+    @commands.command(name="test_push")
+    @commands.has_permissions(administrator=True)
+    async def test_push(self, ctx):
+        await ctx.send("🚀 正在手動觸發 AI 出題測試...", delete_after=5)
+        await self.push_question()
 
     @commands.command(name="top")
     @is_csie_channel()
     async def top(self, ctx):
         users = self.db.get_top_users(10)
         desc = "".join([
-                           f"{'🥇' if i == 1 else '🥈' if i == 2 else '🥉' if i == 3 else f'{i}.'} **{self.bot.get_user(uid).display_name if self.bot.get_user(uid) else uid}** — `{xp} XP` (Lv.{(xp // 100) + 1})\n"
-                           for i, (uid, xp) in enumerate(users, 1)])
+            f"{'🥇' if i == 1 else '🥈' if i == 2 else '🥉' if i == 3 else f'{i}.'} **{self.bot.get_user(uid).display_name if self.bot.get_user(uid) else uid}** — `{xp} XP` (Lv.{(xp // 100) + 1})\n"
+            for i, (uid, xp) in enumerate(users, 1)])
         await ctx.send(embed=discord.Embed(title="🏆 戰友修行榜", description=desc or "目前無人上榜", color=0xf1c40f))
 
     @commands.command(name="rank")
@@ -186,10 +193,10 @@ class ExaminerCog(commands.Cog):
         await ctx.send(embed=embed)
 
 
-# --- 6. ✨ 最終修正：平實戰友 TutorCog ---
+# --- 6. 戰友 TutorCog (已整合你滿意的最終版 Prompt) ---
 class TutorCog(commands.Cog):
     def __init__(self, bot):
-        self.bot = bot;
+        self.bot = bot
         self.history_cache = {}
 
     @commands.Cog.listener()
@@ -200,7 +207,7 @@ class TutorCog(commands.Cog):
                 user_id = message.author.id
                 if user_id not in self.history_cache: self.history_cache[user_id] = []
 
-                # ✨ 自然、不油膩、有邊界的指令
+                # ✨ 這是你滿意的人格與社交邏輯版本
                 instruction = """你是一位正在準備資工所考研的『戰友助教』。
 
                 【人格特質】
@@ -214,7 +221,7 @@ class TutorCog(commands.Cog):
                 【語言守則】
                 - 必須使用台灣繁體中文（行程、執行緒、記憶體、死結）。
                 - 計算題強制使用『代碼塊』垂直拆解，嚴禁 LaTeX。
-                
+
                 【社交邏輯：像個正常人】
                 1. 生活與學科的比例：
                    - 當戰友聊生活/晚餐/累了，請『順著話聊』，並且保持溫柔，站在對方的角度思考，並適時給予鼓勵。
@@ -261,23 +268,23 @@ class TutorCog(commands.Cog):
         await ctx.send("🧹 記憶已清空。")
 
 
-# --- 7. 啟動入口 (IPv4 加固) ---
+# --- 7. 啟動入口 ---
 class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.all())
         self.db = StudyDB(DB_PATH)
 
     async def setup_hook(self):
-        # ✨ 核心加固：注入 IPv4 連線器
+        # ✨ IPv4 連線加固
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.http.connector = connector
-        # ✨ 完整註冊所有組件
+        # 註冊所有組件
         await self.add_cog(ExaminerCog(self, self.db))
         await self.add_cog(TutorCog(self))
         self.add_view(ChallengeView(self.db, ""))
 
     async def on_ready(self):
-        print(f"🚀 {self.user.name} 全能平實版已就緒。")
+        print(f"🚀 {self.user.name} 全能平實戰友版已就緒。")
 
 
 if __name__ == "__main__":
