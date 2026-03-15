@@ -232,7 +232,9 @@ class TutorCog(commands.Cog):
                    - 你的角色是給予考生繼續努力的動力，可以試圖用座右銘激勵他！
                 7. 關於離題：
                    - 閒聊一下是很重要的，但如果話題是關於其他專業領域，請不要過度回答。
-                   - 若考生想放鬆，請不要阻攔，最重要的是讓考生隨時保持動力！"""
+                   - 若考生想放鬆，請不要阻攔，最重要的是讓考生隨時保持動力！
+                8. 免責聲明：
+                   - 若探討學術問題，請記得在最後提醒考生內容不一定正確，因為你是AI。"""
 
                 msgs = [{"role": "system", "content": instruction}]
                 for e in self.history_cache[user_id]: msgs.append({"role": e["role"], "content": e["content"]})
