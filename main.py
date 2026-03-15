@@ -20,7 +20,6 @@ GROQ_KEY = os.getenv("GROQ_API_KEY")
 DB_PATH = os.getenv("DB_PATH", "csie_study.db")
 tw_tz = timezone(timedelta(hours=8))
 
-# ✨ 使用目前 Groq 支援的最強穩定模型
 groq_client = AsyncGroq(api_key=GROQ_KEY)
 MODEL_NAME = "llama-3.3-70b-versatile"
 
@@ -83,7 +82,7 @@ class StudyDB:
                               (subject, text, datetime.date.today().isoformat()))
 
 
-# --- 4. UI 元件 (批改模式) ---
+# --- 4. UI 元件 (✨ 修正：加入 XP 顯示回饋) ---
 class AnswerModal(ui.Modal, title='📝 提交修行答案'):
     answer = ui.TextInput(label='你的回答', style=discord.TextStyle.paragraph, placeholder='戰友，寫下你的邏輯...',
                           min_length=5, max_length=500)
@@ -109,11 +108,22 @@ class AnswerModal(ui.Modal, title='📝 提交修行答案'):
             if "SCORE_DATA:" in ai_reply:
                 main_text, _, json_part = ai_reply.partition("SCORE_DATA:")
                 data = json.loads(json_part.strip().replace("```json", "").replace("```", ""))
+
                 if data.get('is_related'):
                     user_info = self.db.get_user(interaction.user.id)
-                    if not user_info or user_info[1] != datetime.date.today().isoformat():
-                        self.db.add_xp(interaction.user.id, int(10 + data['score'] * 2))
+                    today_str = datetime.date.today().isoformat()
+
+                    # ✨ 計算這次獲得的 XP
+                    xp_gain = int(10 + data['score'] * 2)
+
                     embed = discord.Embed(title="🎯 結算報告", description=main_text.strip()[:1000], color=0x3498db)
+
+                    if not user_info or user_info[1] != today_str:
+                        self.db.add_xp(interaction.user.id, xp_gain)
+                        embed.add_field(name="XP 獲得", value=f"✨ 戰友太強了！這次修行獲得了 **{xp_gain}** 點經驗值！")
+                    else:
+                        embed.add_field(name="XP 狀態", value="💡 今日修行已達標，經驗值已領取過囉。")
+
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
                     await interaction.followup.send("⚠️ 內容跑題了，戰友再確認一下？", ephemeral=True)
@@ -135,7 +145,7 @@ class ChallengeView(ui.View):
         await interaction.response.send_modal(AnswerModal(self.db, self.today_q))
 
 
-# --- 5. 考官、排行榜 Cog ---
+# --- 5. 考官、排行榜 Cog (含 !test_push) ---
 class ExaminerCog(commands.Cog):
     def __init__(self, bot, db):
         self.bot = bot
@@ -163,7 +173,6 @@ class ExaminerCog(commands.Cog):
         except Exception as e:
             print(f"產題失敗: {e}")
 
-    # ✨ 整合回來的測試指令
     @commands.command(name="test_push")
     @commands.has_permissions(administrator=True)
     async def test_push(self, ctx):
@@ -193,7 +202,7 @@ class ExaminerCog(commands.Cog):
         await ctx.send(embed=embed)
 
 
-# --- 6. 戰友 TutorCog (已整合你滿意的最終版 Prompt) ---
+# --- 6. 戰友 TutorCog (已整合你最滿意的 Prompt) ---
 class TutorCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -207,41 +216,21 @@ class TutorCog(commands.Cog):
                 user_id = message.author.id
                 if user_id not in self.history_cache: self.history_cache[user_id] = []
 
-                # ✨ 這是你滿意的人格與社交邏輯版本
                 instruction = """你是一位正在準備資工所考研的『戰友助教』。
 
-                【人格特質】
-                - 語氣：自然、像大學同學。因為你是考生的得力戰友，可以保持溫柔，需顧及考生的心態。
-                - 表情符號：每則回覆最多限制使用 1 到 2 個 Emoji。
+                【人格特質】自然、像大學同學。溫柔但平實，需顧及戰友心態。Emoji 限 1-2 個。
 
-                【話題控制】
-                - 關於『生活/食物』：站在對方的角度，適時的誇獎或給予建議。
-                - 話題導回：連續兩輪沒聊學科時，結尾簡短提醒進度。
+                【話題控制】生活/食物話題順著話聊並給予建議。連續兩輪沒聊學科時結尾再簡短提進度。
 
-                【語言守則】
-                - 必須使用台灣繁體中文（行程、執行緒、記憶體、死結）。
-                - 計算題強制使用『代碼塊』垂直拆解，嚴禁 LaTeX。
+                【語言守則】台灣繁體中文（行程、執行緒、記憶體、死結）。計算題強制代碼塊對齊，嚴禁 LaTeX。
 
-                【社交邏輯：像個正常人】
-                1. 生活與學科的比例：
-                   - 當戰友聊生活/晚餐/累了，請『順著話聊』，並且保持溫柔，站在對方的角度思考，並適時給予鼓勵。
-                   - 不要主動提到讀書，除非戰友先提，或是對話已經閒聊超過三輪。
-                2. 拒絕說教
-                3. 表情管制：
-                   - 全文最多 1 個 Emoji，甚至不用也可以，維持工程師的簡潔感。
-                4. 有同理心：
-                   - 試圖站在對方的角度看問題，像是解題困難，壓力大，或是吃飯的選擇。
-                5. 關於餐食選擇：
-                   - 可以以健康的角度給予建議，如果可以的話請給考生條列幾種組合作選擇，讓考生可以保持健康的飲食。
-                   - 若考生想吃放縱餐，不要直接阻擋，適時給予情緒價值，並鼓勵考生繼續努力。
-                6. 關於情緒：
-                   - 考生在準備的過程可能伴隨巨大壓力，若考生有了情緒請適時地安慰或給予鼓勵。
-                   - 你的角色是給予考生繼續努力的動力，可以試圖用座右銘激勵他！
-                7. 關於離題：
-                   - 閒聊一下是很重要的，但如果話題是關於其他專業領域，請不要過度回答。
-                   - 若考生想放鬆，請不要阻攔，最重要的是讓考生隨時保持動力！
-                8. 免責聲明：
-                   - 若探討學術問題，請記得在最後提醒考生內容不一定正確，因為你是AI。"""
+                【社交邏輯】
+                1. 當戰友聊生活/晚餐/累了，請順著話聊，保持溫柔並給予鼓勵。不要主動提讀書直到閒聊超過三輪。
+                2. 拒絕說教，有同理心，試圖站在對方的角度思考（壓力大、解題難或晚餐選擇）。
+                3. 餐食選擇：提供健康建議或條列式組合。若想吃放縱餐，適時給予情緒價值並鼓勵繼續努力。
+                4. 情緒支持：適時安慰，可用座右銘激勵。最重要的是讓戰友隨時保持動力！
+                5. 閒聊很重要，但其他專業領域不要過度回答。
+                6. 免責聲明：學術問題最後提醒考生內容不一定正確，因為你是AI。"""
 
                 msgs = [{"role": "system", "content": instruction}]
                 for e in self.history_cache[user_id]: msgs.append({"role": e["role"], "content": e["content"]})
@@ -275,16 +264,14 @@ class MyBot(commands.Bot):
         self.db = StudyDB(DB_PATH)
 
     async def setup_hook(self):
-        # ✨ IPv4 連線加固
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
         self.http.connector = connector
-        # 註冊所有組件
         await self.add_cog(ExaminerCog(self, self.db))
         await self.add_cog(TutorCog(self))
         self.add_view(ChallengeView(self.db, ""))
 
     async def on_ready(self):
-        print(f"🚀 {self.user.name} 全能平實戰友版已就緒。")
+        print(f"🚀 {self.user.name} CSIE 全能回饋版已啟動。")
 
 
 if __name__ == "__main__":
