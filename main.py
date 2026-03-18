@@ -94,7 +94,11 @@ class AnswerModal(ui.Modal, title='📝 提交修行答案'):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.send_message("⏳ 正在閱卷中...", ephemeral=True)
-        instruction = "你是一位資工所考研戰友。請針對回答給予簡短建議。最後一行格式：SCORE_DATA: {\"score\": 1-10, \"is_related\": bool}"
+        instruction = """你是一位專業的資工所考研戰友。請針對回覆給予建議。
+                【關鍵邏輯】
+                1. 若回答為『不知道』、『忘了』、『...』或明顯敷衍之詞，請將 score 設為 0，並在評語中溫柔地鼓勵戰友去查資料或嘗試寫出部分邏輯，告訴他『再嘗試回答一次才能拿到經驗值喔！』。
+                2. 若有認真作答，根據邏輯完整度給分 (1-10)。
+                3. 最後一行格式：SCORE_DATA: {"score": 0-10, "is_related": bool}"""
         try:
             completion = await groq_client.chat.completions.create(
                 messages=[
@@ -160,9 +164,15 @@ class ExaminerCog(commands.Cog):
         channel = self.bot.get_channel(FORUM_CHANNEL_ID)
         if not channel: return
         target = random.choice(["OS", "計組", "資料結構與演算法", "離散數學"])
+        prompt = f"""請產出一組關於『{target}』的資工考研『題組』。
+        【要求】
+        1. 以『情境案例』或『多個關連知識點串接』形式命題。
+        2. 題目需具備深度，能引發思考，字數不限。
+        3. 必須使用台灣繁體中文，絕對禁止簡體術語（如：进程、線程、內存、數據庫等，請正確轉換為行程、執行緒、記憶體、資料庫）。
+        4. 呈現格式要清晰易讀。"""
         try:
             res = await groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": f"產出一題關於 {target} 的資工考研觀念題，50字內。"}],
+                messages=[{"role": "user", "content":prompt}],
                 model=MODEL_NAME
             )
             q_text = res.choices[0].message.content.strip()
