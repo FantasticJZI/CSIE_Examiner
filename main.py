@@ -163,11 +163,11 @@ class ExaminerCog(commands.Cog):
     async def push_question(self):
         channel = self.bot.get_channel(FORUM_CHANNEL_ID)
         if not channel: return
-        target = random.choice(["OS", "計組", "資料結構與演算法", "離散數學"])
+        target = random.choice(["作業系統", "計組", "資料結構與演算法", "離散數學"])
         prompt = f"""請產出一組關於『{target}』的資工考研『題組』。
         【要求】
-        1. 以『情境案例』或『多個關連知識點串接』形式命題。
-        2. 題目需具備深度，能引發思考，字數不限，但題數最多三題。
+        1. 以『多個關連知識點串接』形式命題。
+        2. 題目需具備深度，能引發思考，難易度為中偏易，字數不限，但題數最多兩題。
         3. 必須使用台灣繁體中文，絕對禁止簡體術語（如：进程、線程、內存、數據庫等，請正確轉換為行程、執行緒、記憶體、資料庫）。
         4. 呈現格式要清晰易讀。"""
         try:
